@@ -43,40 +43,79 @@ const express = require('express');
 const mongoose = require('mongoose');
 const { scheduleJob, stopJob, startJob, runJobManually, loadJobs } = require('./utils/jobScheduler');
 const Job = require('./models/job');
+const { CronJob } = require('cron')
+const init = require('./producer')
+const worker = require('./worker')
 const app = express();
 app.use(express.json());
+let task;
 
-mongoose.connect('mongodb://localhost:27017/scheduler', { useUnifiedTopology: true });
 
-app.post('/jobs', async (req, res) => {
-    const { name, cronTime, task, startTime, endTime } = req.body;
-    const job = new Job({ name, cronTime, task, startTime, endTime, status: 'active' });
-    await job.save();
-    await scheduleJob(job);
-    res.status(201).send(job);
+app.get('/hit-endpoint', async (req, res) => {
+    const id = await init()
+    res.json(`done message executed ${id}`)
+});
+app.get('/execute-manually', async (req, res) => {
+    const id = await init()
+    res.json(`done message executed ${id}`)
+});
+const taskFunction = () => {
+    console.log('Running the scheduled task...');
+};
+const scheduleTask = () => {
+    task = new CronJob(
+        '32 15 * * *',
+        function () {
+            worker()
+            console.log('You will see the message execution');
+        },
+        null,
+        true,
+    );
+    console.log('task scheduled')
+};
+app.post('/start', (req, res) => {
+    new CronJob(
+        '* * * * *',
+        function () {
+            worker()
+            console.log('You will see the message execution');
+        },
+        null,
+        true,
+    );
+    res.send('Cron job started and executed manually');
+});
+// Endpoint to stop the cron job
+app.post('/stop', (req, res) => {
+    if (task.running) {
+        task.stop();
+        res.send('Cron job stopped');
+    } else {
+        res.send('Cron job is not running');
+    }
 });
 
-app.post('/jobs/:name/stop', async (req, res) => {
-    const { name } = req.params;
-    await stopJob(name);
-    await Job.updateOne({ name }, { status: 'inactive' });
-    res.send({ message: `Job "${name}" stopped` });
+// Endpoint to manually execute the cron job
+app.post('/execute', (req, res) => {
+    taskFunction();
+    res.send('Cron job executed manually');
 });
 
-app.post('/jobs/:name/start', async (req, res) => {
-    const { name } = req.params;
-    await startJob(name);
-    res.send({ message: `Job "${name}" started` });
+app.get('/status', (req, res) => {
+    res.send(`Cron job is ${task.running ? 'running' : 'not running'}`);
 });
+app.listen(3000, async () => {
+    scheduleTask();
+    console.log('server started at 3000')
 
-app.post('/jobs/:name/run', async (req, res) => {
-    const { name } = req.params;
-    await runJobManually(name);
-    res.send({ message: `Job "${name}" run manually` });
-});
-
-app.listen(3000, () => {
-    console.log('Server running on port 3000');
-    // loadJobs(); // Load and schedule jobs on startup
-    main()
+    // new CronJob(
+    //     '32 15 * * *',
+    //     function () {
+    //         worker()
+    //         console.log('You will see the message execution');
+    //     },
+    //     null,
+    //     true,
+    // );
 });
